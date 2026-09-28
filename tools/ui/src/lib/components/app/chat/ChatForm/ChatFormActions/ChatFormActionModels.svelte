@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { ModelsSelectorDropdown } from '$lib/components/app';
-	import { conversationsStore, modelsStore, serverStore } from '$lib/stores';
+	import { LOCAL_BACKEND_ID } from '$lib/constants';
+	import {
+		backendsModelsStore,
+		backendsStore,
+		conversationsStore,
+		modelsStore,
+		serverStore
+	} from '$lib/stores';
 	import { getConversationModel } from '$lib/utils';
 
 	interface Props {
@@ -28,7 +35,14 @@
 	}: Props = $props();
 
 	let isRouter = $derived(serverStore.isRouterMode);
-	let isOffline = $derived(!!serverStore.error);
+	// the provider this selector is pointed at, which is the one its colours report
+	let selectorError = $derived.by(() => {
+		const backendId = backendsStore.active.id;
+
+		return backendId === LOCAL_BACKEND_ID
+			? Boolean(serverStore.error)
+			: backendsModelsStore.get(backendId).error !== null;
+	});
 
 	let conversationModel = $derived(
 		getConversationModel(conversationsStore.activeMessages as DatabaseMessage[])
@@ -52,10 +66,16 @@
 
 	$effect(() => {
 		if (conversationModel && conversationModel !== lastSyncedConversationModel) {
-			if (modelsStore.models.some((m) => m.model === conversationModel)) {
+			const option = modelsStore.models.find((m) => m.model === conversationModel);
+
+			// only sync models served by the active backend; a model from another
+			// backend must not yank the active tab (and trigger a full backend
+			// switch) just because the conversation used it. sends resolve their
+			// backend explicitly via ensureModelBackend
+			if (option && option.backendId === backendsStore.active.id) {
 				modelsStore.selectedModelName = conversationModel;
 				modelsStore.selectModelByName(conversationModel);
-			} else {
+			} else if (!option) {
 				modelsStore.selectedModelName = null;
 				modelsStore.clearSelection();
 			}
@@ -154,6 +174,7 @@
 	bind:this={selectorModelRef}
 	currentModel={selectorModel}
 	disabled={disabled || isOffline}
+	error={selectorError}
 	{forceForegroundText}
 	{useGlobalSelection}
 />

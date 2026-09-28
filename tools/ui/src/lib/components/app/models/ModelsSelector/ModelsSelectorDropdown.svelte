@@ -9,6 +9,7 @@
 		ModelsSelectorOption,
 		ModelsSelectorTriggerIcon
 	} from '$lib/components/app';
+	import { DialogBackendForm } from '$lib/components/app/backends';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { DROPDOWN_MENU_CONTENT_SEARCH_SELECTOR, MODEL_ICON, SETTINGS_KEYS } from '$lib/constants';
@@ -17,15 +18,21 @@
 	import { ModelsService } from '$lib/services/models.service';
 	import { deviceStore, modelsStore, settingsStore, uiStore } from '$lib/stores';
 	import type { ModelOption, ModelSidecarBadge } from '$lib/types/models';
-	import type { ModelItem } from '$lib/utils';
-	import { modelLoadFraction, repoOf } from '$lib/utils';
+	import { type ModelItem, modelLoadFraction, repoOf } from '$lib/utils';
+	import { rawModelId } from '$lib/utils/model-option-id';
 
 	interface Props {
 		class?: string;
 		currentModel?: string | null;
 		disabled?: boolean;
+		/** The provider behind this selector is unreachable. */
+		error?: boolean;
 		forceForegroundText?: boolean;
-		onModelChange?: (modelId: string, modelName: string) => Promise<boolean> | boolean | void;
+		onModelChange?: (
+			modelId: string,
+			modelName: string,
+			backendId?: string
+		) => Promise<boolean> | boolean | void;
 		useGlobalSelection?: boolean;
 	}
 
@@ -33,6 +40,7 @@
 		class: className = '',
 		currentModel = null,
 		disabled = false,
+		error = false,
 		forceForegroundText = false,
 		onModelChange,
 		useGlobalSelection = false
@@ -40,6 +48,7 @@
 
 	let isOpen = $state(false);
 	let highlightedId = $state<string | null>(null);
+	let showAddBackend = $state(false);
 
 	const ms = useModelsSelector({
 		currentModel: () => currentModel,
@@ -63,9 +72,11 @@
 	/** The trigger reads the same on a phone and on a desktop, only its container differs. */
 	let triggerClasses = $derived([
 		`relative inline-grid cursor-pointer grid-cols-[1fr_auto_1fr] items-center gap-1 rounded-sm bg-background px-1.5 py-1 text-xs shadow-sm transition hover:bg-muted-foreground/20 max-md:gap-1.5 max-md:h-7 max-md:px-2.25 max-md:py-1 max-md:text-[13px] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-muted-foreground/15 dark:text-secondary-foreground`,
-		!ms.isCurrentModelInCache
-			? 'bg-red-400/10 !text-red-400 hover:bg-red-400/20 hover:text-red-400'
-			: 'text-foreground'
+		error
+			? 'border-destructive/40 bg-destructive/10 !text-destructive hover:bg-destructive/20'
+			: !ms.isCurrentModelInCache
+				? 'bg-red-400/10 !text-red-400 hover:bg-red-400/20 hover:text-red-400'
+				: 'text-foreground'
 	]);
 
 	let triggerStatus = $derived(
@@ -141,6 +152,9 @@
 		for (const group of ms.groupedFilteredOptions.available) {
 			for (const item of group.items) order.push(item.option.id);
 		}
+		for (const provider of ms.groupedFilteredOptions.providers) {
+			for (const item of provider.items) order.push(item.option.id);
+		}
 
 		return order;
 	});
@@ -174,6 +188,13 @@
 		setTimeout(() => uiStore.openModelsManager(), 0);
 	}
 
+	function handleAddBackend() {
+		isOpen = false;
+
+		// let the menu finish closing before the dialog takes focus
+		setTimeout(() => (showAddBackend = true), 0);
+	}
+
 	// Alt+Enter only unloads and keeps the dropdown open.
 	async function handleModelKeyAction(modelId: string, unload: boolean) {
 		if (!unload) {
@@ -182,11 +203,13 @@
 			return;
 		}
 
-		const status = modelsStore.getModelStatus(modelId);
+		// an option id is backend-qualified, the router lists the raw model id
+		const rawId = rawModelId(modelId);
+		const status = modelsStore.getModelStatus(rawId);
 
 		if (status === ServerModelStatus.LOADING) return;
 
-		await modelsStore.status.unload(modelId);
+		await modelsStore.status.unload(rawId);
 	}
 
 	export function open() {
@@ -301,6 +324,8 @@
 				favorites={ms.favoriteItems}
 				groups={ms.groupedFilteredOptions}
 				loaded={ms.loadedItems}
+				onProviderBack={ms.isProviderView ? ms.closeProvider : undefined}
+				onProviderOpen={ms.openProvider}
 				onSelect={ms.handleSelect}
 				renderOption={modelOption}
 				sectionHeaderClass={isMobile
@@ -353,7 +378,13 @@
 				<MODEL_ICON class="h-3.5 w-3.5 shrink-0" />
 			</span>
 		{:else}
-			<span class="text-xs text-muted-foreground">No models yet.</span>
+			<button
+				class="cursor-pointer text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+				onclick={handleAddBackend}
+				type="button"
+			>
+				No models yet. Add a backend to get started.
+			</button>
 		{/if}
 	{:else}
 		{#if ms.isMultiModel}
@@ -390,13 +421,11 @@
 									{...props}
 									class={[
 										`relative inline-grid cursor-pointer grid-cols-[1fr_auto_1fr] items-center gap-1 rounded-sm bg-background px-1.5 py-1 text-xs shadow-sm transition hover:bg-muted-foreground/20 max-md:gap-1.5 max-md:h-8 max-md:px-2.25 max-md:py-1.25 max-md:text-[13px] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-muted-foreground/15 dark:text-secondary-foreground`,
-										!ms.isCurrentModelInCache
-											? 'bg-red-400/10 !text-red-400 hover:bg-red-400/20 hover:text-red-400'
-											: forceForegroundText
-												? 'text-foreground'
-												: ms.isHighlightedCurrentModelActive
-													? 'text-foreground'
-													: 'text-foreground',
+										error
+											? 'border-destructive/40 bg-destructive/10 !text-destructive hover:bg-destructive/20'
+											: !ms.isCurrentModelInCache
+												? 'bg-red-400/10 !text-red-400 hover:bg-red-400/20 hover:text-red-400'
+												: 'text-foreground',
 										isOpen && 'text-foreground',
 										'max-w-[min(calc(100vw-4rem) md:max-w-[min(calc(100cqw-9rem),25rem)]'
 									]}
@@ -491,3 +520,8 @@
 		{/if}
 	{/if}
 </div>
+
+<DialogBackendForm
+	bind:open={showAddBackend}
+	onSaved={(backend) => void ms.showBackendModels(backend.id)}
+/>
