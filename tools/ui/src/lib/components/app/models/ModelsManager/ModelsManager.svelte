@@ -18,7 +18,14 @@
 	} from './utils';
 	import { LOCAL_BACKEND_ID, type ModalityKey, MODELS_TABLE_GROUP_LABELS } from '$lib/constants';
 	import { ModelCapability, ModelsTableGroupKind, ModelsTableProviderKind } from '$lib/enums';
-	import { backendsStore, conversationsStore, deviceStore, modelsStore, serverStore, uiStore } from '$lib/stores';
+	import {
+		backendsStore,
+		conversationsStore,
+		deviceStore,
+		modelsStore,
+		serverStore,
+		uiStore
+	} from '$lib/stores';
 	import type { ModelOption } from '$lib/types/models';
 	import { filterModelOptions } from '$lib/utils';
 	import { getBackend } from '$lib/utils/api-base';
