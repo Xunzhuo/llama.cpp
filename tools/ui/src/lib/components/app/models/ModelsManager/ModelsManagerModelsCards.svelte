@@ -9,6 +9,7 @@
 		type ModelsTableGroup
 	} from './utils';
 	import {
+		CheckCircle2,
 		ChevronDown,
 		ChevronUp,
 		Download,
@@ -95,7 +96,8 @@
 	const FLAT_SECTIONS = new Set<ModelsTableGroup['kind']>([
 		ModelsTableGroupKind.DOWNLOADING,
 		ModelsTableGroupKind.FAVORITES,
-		ModelsTableGroupKind.LOADED
+		ModelsTableGroupKind.LOADED,
+		ModelsTableGroupKind.SELECTED
 	]);
 	let sections = $derived(
 		groups.map((group) => {
@@ -374,6 +376,8 @@
 							<Heart class="h-3.5 w-3.5 shrink-0" />
 						{:else if group.kind === ModelsTableGroupKind.LOADED}
 							<Power class="h-3.5 w-3.5 shrink-0" />
+						{:else if group.kind === ModelsTableGroupKind.SELECTED}
+							<CheckCircle2 class="h-3.5 w-3.5 shrink-0" />
 						{:else if group.kind === ModelsTableGroupKind.HIDDEN}
 							<EyeOff class="h-3.5 w-3.5 shrink-0" />
 						{:else if group.kind === ModelsTableGroupKind.LOCAL}
