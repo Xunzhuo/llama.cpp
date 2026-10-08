@@ -1,7 +1,7 @@
 // Guards the phone model picker: the dropdown serves a phone a bottom drawer
 // with the same search, sections and manage entry the desktop menu shows.
 
-import ModelsSelectorDropdown from '$lib/components/app/models/ModelsSelector/ModelsSelectorDropdown.svelte';
+import ModelsSelectorDropdownWrapper from './components/ModelsSelectorDropdownWrapper.svelte';
 import { ServerRole } from '$lib/enums';
 import { modelsStore } from '$lib/stores/models/index.svelte';
 import { serverStore } from '$lib/stores/server.svelte';
@@ -28,17 +28,18 @@ const other: ModelOption = {
 describe('model picker drawer on a phone', () => {
 	beforeEach(async () => {
 		serverStore.role = ServerRole.ROUTER;
-		modelsStore.models = [option, other];
+		// the models read through the providers data layer on this layer of the stack
+		modelsStore.activeModels = [option, other];
 		await page.viewport(PHONE.width, PHONE.height);
 	});
 
 	afterEach(async () => {
-		modelsStore.models = [];
+		modelsStore.activeModels = [];
 		await page.viewport(DESKTOP.width, DESKTOP.height);
 	});
 
 	it('opens the picker in a drawer', async () => {
-		const screen = render(ModelsSelectorDropdown, { currentModel: option.model });
+		const screen = render(ModelsSelectorDropdownWrapper, { currentModel: option.model });
 
 		await screen.getByRole('button').click();
 
