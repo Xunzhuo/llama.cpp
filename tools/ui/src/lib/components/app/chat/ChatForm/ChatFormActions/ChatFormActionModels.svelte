@@ -173,7 +173,7 @@
 <ModelsSelectorDropdown
 	bind:this={selectorModelRef}
 	currentModel={selectorModel}
-	disabled={disabled || isOffline}
+	{disabled}
 	error={selectorError}
 	{forceForegroundText}
 	{useGlobalSelection}

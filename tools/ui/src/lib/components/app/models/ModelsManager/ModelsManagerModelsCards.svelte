@@ -2,7 +2,12 @@
 	import ModelDownloadProgressBar from '../ModelDownloadProgressBar.svelte';
 	import ModelsManagerTableToolbar from './ModelsManagerTableToolbar.svelte';
 	import { modelRowActions } from './row-actions';
-	import { downloadProgressFor, type ModelQuantGroup, type ModelsTableGroup } from './utils';
+	import {
+		canLoadOption,
+		downloadProgressFor,
+		type ModelQuantGroup,
+		type ModelsTableGroup
+	} from './utils';
 	import {
 		ChevronDown,
 		ChevronUp,
@@ -87,7 +92,7 @@
 	/** Repos whose quants are folded away; the rest show them. */
 	const collapsedQuants = new SvelteSet<string>();
 	/** Sections that list their models straight, without folding them into families. */
-	const FLAT_SECTIONS = new Set<ModelsTableGroupKind>([
+	const FLAT_SECTIONS = new Set<ModelsTableGroup['kind']>([
 		ModelsTableGroupKind.DOWNLOADING,
 		ModelsTableGroupKind.FAVORITES,
 		ModelsTableGroupKind.LOADED
@@ -189,7 +194,11 @@
 			<span class="min-w-0 flex-1 truncate text-sm text-muted-foreground">{option.model}</span>
 
 			<DropdownMenuActions
-				actions={modelRowActions(option, favorite, isHidden, requestDelete)}
+				actions={modelRowActions(
+					option,
+					{ canLoad: canLoadOption(option), favorite, isHidden },
+					{ onDelete: requestDelete }
+				)}
 				align="end"
 				triggerIcon={MoreHorizontal}
 				triggerTooltip="Model actions"
@@ -236,7 +245,11 @@
 			</button>
 
 			<DropdownMenuActions
-				actions={modelRowActions(option, favorite, isHidden, requestDelete, download)}
+				actions={modelRowActions(
+					option,
+					{ canLoad: canLoadOption(option), download, favorite, isHidden },
+					{ onDelete: requestDelete }
+				)}
 				align="end"
 				triggerIcon={MoreHorizontal}
 				triggerTooltip="Model actions"
