@@ -1,4 +1,17 @@
 <script lang="ts">
+	import ModelDownloadProgressBar from '../ModelDownloadProgressBar.svelte';
+	import ModelsManagerTableToolbar from './ModelsManagerTableToolbar.svelte';
+	import { modelRowActions } from './row-actions';
+	import { downloadProgressFor, type ModelQuantGroup, type ModelsTableGroup } from './utils';
+	import {
+		ChevronDown,
+		ChevronUp,
+		Download,
+		EyeOff,
+		Heart,
+		MoreHorizontal,
+		Power
+	} from '@lucide/svelte';
 	import {
 		CollapsibleRegion,
 		DropdownMenuActions,
@@ -15,12 +28,11 @@
 	import * as Card from '$lib/components/ui/card';
 	import {
 		FAMILY_ROW_WINDOW,
-		MODEL_ROW_WINDOW,
 		type ModalityKey,
+		MODEL_ROW_WINDOW,
 		SETTINGS_KEYS
 	} from '$lib/constants';
 	import {
-		KeyboardKey,
 		ModelCapability,
 		ModelDownloadConfirmAction,
 		ModelGroupKind,
@@ -30,21 +42,8 @@
 	import { modelsStore, settingsStore } from '$lib/stores';
 	import type { ModelOption } from '$lib/types/models';
 	import { groupModelFamilies, type ModelFamilyGroup } from '$lib/utils/model-families';
-	import {
-		ChevronDown,
-		ChevronUp,
-		Download,
-		EyeOff,
-		Heart,
-		MoreHorizontal,
-		Power
-	} from '@lucide/svelte';
 	import type { Snippet } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import ModelDownloadProgressBar from '../ModelDownloadProgressBar.svelte';
-	import ModelsManagerTableToolbar from './ModelsManagerTableToolbar.svelte';
-	import { modelRowActions } from './row-actions';
-	import { downloadProgressFor, type ModelQuantGroup, type ModelsTableGroup } from './utils';
 
 	interface Props {
 		/** Capabilities a model must have every one of. */
@@ -129,12 +128,6 @@
 		} else {
 			collapsedQuants.add(key);
 		}
-	}
-
-	function handleFamilyKeydown(event: KeyboardEvent, toggle: () => void): void {
-		if (event.key === KeyboardKey.SPACE) event.preventDefault();
-
-		if (event.key === KeyboardKey.ENTER || event.key === KeyboardKey.SPACE) toggle();
 	}
 </script>
 
@@ -317,7 +310,7 @@
 	{/if}
 {/snippet}
 
-{#snippet cardItem({ depth, entry }: { depth: number; entry: ModelQuantGroup })}
+{#snippet cardItem({ entry }: { depth: number; entry: ModelQuantGroup })}
 	{@render cardTree(entry)}
 {/snippet}
 
