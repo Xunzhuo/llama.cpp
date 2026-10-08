@@ -207,8 +207,10 @@ export function useModelsSelector(opts: UseModelsSelectorOptions): UseModelsSele
 	function handleOpenChange(open: boolean) {
 		if (loading || updating) return;
 
-		// a single-model server has no list: the trigger opens the manager instead
-		if (!isRouter) {
+		// a lone llama.cpp server without a router has no list: the trigger opens
+		// the manager instead. router mode and external backends both expose a
+		// selectable list, so their role does not decide here
+		if (!isMultiModel) {
 			if (open) uiStore.openModelsManager();
 
 			return;
