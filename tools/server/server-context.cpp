@@ -454,6 +454,10 @@ struct server_slot {
         if (!llama_get_memory(ctx_tgt)) {
             return false;
         }
+        // with non-causal attention, the tokens of a ubatch also attend to the later ones
+        if (!llama_get_causal_attn(ctx_tgt)) {
+            return false;
+        }
         // context can be chunked/split if the pooling type is LAST
         const auto pooling = llama_pooling_type(ctx_tgt);
         if (pooling == LLAMA_POOLING_TYPE_LAST) {
@@ -2381,7 +2385,7 @@ private:
             const int32_t n_embd_out = llama_model_n_embd_out(model_tgt);
             const int32_t n_pointer  = n_embd_out / 2;
             const float * embd_q = decision.pointer >= 0 ? get_embd(decision.pointer) : nullptr;
-            GGML_ASSERT(decision.column >= 0 && decision.column < n_embd_out);
+            GGML_ASSERT(decision.column >= 0 && decision.n_columns > 0 && decision.column + decision.n_columns <= n_embd_out);
 
             for (const int32_t marker : decision.markers) {
                 const float * embd = get_embd(marker);
@@ -2390,7 +2394,7 @@ private:
                     return;
                 }
                 if (decision.pointer < 0) {
-                    res->scores.push_back(embd[decision.column]);
+                    res->scores.insert(res->scores.end(), embd + decision.column, embd + decision.column + decision.n_columns);
                     continue;
                 }
                 float dot = 0.0f;

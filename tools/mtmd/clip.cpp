@@ -1711,6 +1711,14 @@ struct clip_model_loader {
                         if (hparams.custom_image_max_tokens <= 0) {
                             get_u32(KEY_IMAGE_MAX_PIXELS, hparams.image_max_pixels, false);
                         }
+                        // optional: stretch the image to the aligned size instead of padding it, as the transformers processor does
+                        std::string resize_pad;
+                        get_string(KEY_IMAGE_RESIZE_PAD, resize_pad, false);
+                        if (resize_pad == "none") {
+                            hparams.image_resize_pad = PAD_NONE;
+                        } else if (!resize_pad.empty()) {
+                            throw std::runtime_error(string_format("%s: unsupported image resize padding: %s\n", __func__, resize_pad.c_str()));
+                        }
                         hparams.set_warmup_n_tokens(46*46); // avoid OOM on warmup
                         const int warn_min_pixels = 1024 * hparams.n_merge * hparams.n_merge * hparams.patch_size * hparams.patch_size;
                         if (hparams.image_min_pixels < warn_min_pixels) {

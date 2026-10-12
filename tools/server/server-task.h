@@ -180,8 +180,9 @@ struct server_task {
     struct decision {
         std::vector<llama_token> labels;       // logits of these tokens, at the last prompt token
         std::vector<int32_t>     label_groups; // if set, number of labels per output, the output is their max
-        std::vector<int32_t>     markers;      // embeddings[column] at these prompt positions
+        std::vector<int32_t>     markers;      // embeddings[column .. column + n_columns) at these prompt positions
         int32_t                  column = 0;
+        int32_t                  n_columns = 1;
         // if set, embeddings is [q | k], and the output is instead the scaled dot product of q[pointer] and k[marker]
         int32_t                  pointer = -1;
 

@@ -7,6 +7,7 @@
 #include <charconv>
 #include <cmath>
 #include <regex>
+#include <set>
 #include <stdexcept>
 
 static const char * decision_question_type_name(server_decision_question_type type) {
@@ -81,7 +82,8 @@ void server_decision_context::init(const llama_model * model) {
         }
         n_options_max   = labels.size();
         noul_true_first = true;
-    } else if (model_type == COMMON_DECISION_TYPE_LEV || model_type == COMMON_DECISION_TYPE_NIMBLE || model_type == COMMON_DECISION_TYPE_PPLX_DECIDER) {
+    } else if (model_type == COMMON_DECISION_TYPE_LEV || model_type == COMMON_DECISION_TYPE_NIMBLE || model_type == COMMON_DECISION_TYPE_PPLX_DECIDER ||
+               model_type == COMMON_DECISION_TYPE_D3) {
         // label codes are A..Z then AA..ZZ, only the ones that are a single token are used
         std::vector<std::string> codes;
         for (char a = 'A'; a <= 'Z'; a++) {
@@ -169,9 +171,37 @@ void server_decision_context::init(const llama_model * model) {
 // request parsing
 //
 
+// the questions that the d3 runtime rejects, see normalize_question() in d3_runtime.py of the model repo
+static std::string decision_d3_question_error(const server_decision_question & question, const json & criteria) {
+    if (question.type == SERVER_DECISION_QUESTION_CHOICE) {
+        for (const auto & option : question.options) {
+            if (option.key.empty()) {
+                return "choice option keys must be nonempty strings";
+            }
+        }
+    } else if (question.type == SERVER_DECISION_QUESTION_NOUL) {
+        for (const auto & item : criteria.items()) {
+            if (item.key() != "false" && item.key() != "true") {
+                return "noul criteria may only describe \"false\" and \"true\"";
+            }
+        }
+    } else {
+        // the levels are shown by their text, it must tell them apart
+        std::set<std::string> texts;
+        for (const auto & option : question.options) {
+            const std::string text = option.description.is_string() ? option.description.get<std::string>() : option.description.dump();
+            if (text.empty() || !texts.insert(text).second) {
+                return "score levels must be distinct and nonempty";
+            }
+        }
+    }
+    return "";
+}
+
 std::vector<server_decision_question> server_decision_context::parse_questions(const json & body) const {
-    // lfm2-d1 and lfm2-d1-omni accept a null state, for example to ask about images only
-    if (!body.contains("state") || (body.at("state").is_null() && type != COMMON_DECISION_TYPE_LFM2_D1 && type != COMMON_DECISION_TYPE_LFM2_D1_OMNI)) {
+    // lfm2-d1, lfm2-d1-omni and d3 accept a null state, for example to ask about images only
+    const bool null_state = type == COMMON_DECISION_TYPE_LFM2_D1 || type == COMMON_DECISION_TYPE_LFM2_D1_OMNI || type == COMMON_DECISION_TYPE_D3;
+    if (!body.contains("state") ? type != COMMON_DECISION_TYPE_D3 : body.at("state").is_null() && !null_state) {
         throw std::invalid_argument("\"state\" must be provided");
     }
     if (!body.contains("questions") || !body.at("questions").is_object() || body.at("questions").empty()) {
@@ -190,11 +220,15 @@ std::vector<server_decision_question> server_decision_context::parse_questions(c
         auto err = [&id = id](const std::string & msg) {
             return std::invalid_argument("questions." + id + ": " + msg);
         };
+        if (type == COMMON_DECISION_TYPE_D3 && id.empty()) {
+            throw std::invalid_argument("question IDs must be nonempty strings");
+        }
         try {
             if (!q.is_object()) {
                 throw err("must be an object");
             }
-            if (!q.contains("instructions") || q.at("instructions").is_null()) {
+            // d3 shows a default text if there are no instructions
+            if (type != COMMON_DECISION_TYPE_D3 && (!q.contains("instructions") || q.at("instructions").is_null())) {
                 throw err("\"instructions\" must be provided");
             }
 
@@ -205,7 +239,7 @@ std::vector<server_decision_question> server_decision_context::parse_questions(c
 
             server_decision_question question;
             question.id           = id;
-            question.instructions = q.at("instructions");
+            question.instructions = q.contains("instructions") ? q.at("instructions") : json();
 
             const std::string type_name = json_value(q, "type", std::string());
             const json        criteria  = q.contains("criteria") ? q.at("criteria") : json();
@@ -289,13 +323,20 @@ std::vector<server_decision_question> server_decision_context::parse_questions(c
                 }
             }
 
+            if (type == COMMON_DECISION_TYPE_D3) {
+                const std::string msg = decision_d3_question_error(question, criteria);
+                if (!msg.empty()) {
+                    throw err(msg);
+                }
+            }
+
             if (question.options.size() > n_options_max) {
                 throw err(string_format("too many options (%zu), this model supports at most %zu", question.options.size(), n_options_max));
             }
 
             questions.push_back(std::move(question));
-        } catch (const std::invalid_argument &) {
-            if (type != COMMON_DECISION_TYPE_DECISION2) {
+        } catch (const std::invalid_argument & e) {
+            if (!has_question_errors()) {
                 throw;
             }
             server_decision_question invalid;
@@ -304,6 +345,9 @@ std::vector<server_decision_question> server_decision_context::parse_questions(c
                 {"type", q.is_object() && q.contains("type") ? q.at("type") : json()},
                 {"error", "invalid_question"},
             };
+            if (type == COMMON_DECISION_TYPE_D3) {
+                invalid.error["message"] = e.what();
+            }
             questions.push_back(std::move(invalid));
         }
     }
@@ -360,6 +404,11 @@ json server_decision_context::parse_state(const json & body, std::vector<raw_buf
         for (const auto & url : body.at(key)) {
             decision_load_image(url, files);
         }
+    }
+
+    // d3 shows the state as it is given, images only come from "images"
+    if (type == COMMON_DECISION_TYPE_D3) {
+        return body.contains("state") ? body.at("state") : json();
     }
 
     const json & state = body.at("state");
@@ -450,6 +499,82 @@ static json decision_sort_keys(const json & val) {
         return out;
     }
     return val;
+}
+
+// a float as Python's repr() writes it
+static std::string decision_py_float(double value) {
+    char buffer[64];
+    const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value, std::chars_format::general);
+    if (result.ec != std::errc()) {
+        throw std::invalid_argument("invalid JSON number");
+    }
+    std::string number(buffer, result.ptr);
+    const auto exp_pos = number.find('e');
+    if (exp_pos != std::string::npos) {
+        const int exponent = std::stoi(number.substr(exp_pos + 1));
+        // Match Python repr(float): fixed notation for decimal exponents [-4, 16).
+        if (exponent >= -4 && exponent < 16) {
+            std::string digits = number.substr(0, exp_pos);
+            const bool negative = digits.front() == '-';
+            if (negative) {
+                digits.erase(0, 1);
+            }
+            digits.erase(std::remove(digits.begin(), digits.end(), '.'), digits.end());
+            const int point = exponent + 1;
+            if (point <= 0) {
+                number = "0." + std::string(-point, '0') + digits;
+            } else if ((size_t) point >= digits.size()) {
+                number = digits + std::string(point - digits.size(), '0') + ".0";
+            } else {
+                number = digits.substr(0, point) + "." + digits.substr(point);
+            }
+            return negative ? "-" + number : number;
+        }
+    } else if (number.find('.') == std::string::npos) {
+        number += ".0";
+    }
+    return number;
+}
+
+// a JSON value as Python's json.dumps(value, ensure_ascii=False) writes it
+static std::string decision_py_json(const json & value) {
+    if (value.is_number_float()) {
+        return decision_py_float(value.get<double>());
+    }
+    if (value.is_object()) {
+        std::string result = "{";
+        for (const auto & [key, item] : value.items()) {
+            result += (result.size() > 1 ? ", " : "") + json(key).dump() + ": " + decision_py_json(item);
+        }
+        return result + "}";
+    }
+    if (value.is_array()) {
+        std::string result = "[";
+        for (const auto & item : value) {
+            result += (result.size() > 1 ? ", " : "") + decision_py_json(item);
+        }
+        return result + "]";
+    }
+    return value.dump();
+}
+
+// the truth value of a JSON value in Python
+static bool decision_py_truthy(const json & value) {
+    if (value.is_boolean()) {
+        return value.get<bool>();
+    }
+    if (value.is_number()) {
+        return value.get<double>() != 0.0;
+    }
+    if (value.is_string()) {
+        return !value.get<std::string>().empty();
+    }
+    return !value.is_null() && !value.empty();
+}
+
+// the text that d3 shows for a value: strings as they are, other values as JSON, null where it shows a default
+static json decision_d3_text(const json & value) {
+    return value.is_string() || value.is_null() ? value : json(decision_py_json(value));
 }
 
 // kev flattens a JSON value into text, the keys of an object are kept as labels (kev/api.py: render)
@@ -686,6 +811,16 @@ std::string server_decision_context::render(
         {"options",      render_options(question, variant)},
     };
 
+    // d3 is given text, the Jinja tojson filter does not write JSON as d3_format.py does (floats, escapes, large integers)
+    if (type == COMMON_DECISION_TYPE_D3) {
+        inp["state"]        = decision_d3_text(state);
+        inp["instructions"] = decision_py_truthy(question.instructions) ? decision_d3_text(question.instructions) : json();
+        for (auto & option : inp["options"]) {
+            const bool is_default = question.type == SERVER_DECISION_QUESTION_NOUL && !decision_py_truthy(option["description"]);
+            option["description"] = is_default ? json() : decision_d3_text(option["description"]);
+        }
+    }
+
     // the nimble prompt lists all the questions of the request
     if (type == COMMON_DECISION_TYPE_NIMBLE) {
         inp["questions"] = json::array();
@@ -761,6 +896,11 @@ void server_decision_context::fill_task(
 
     const std::string prompt = render(state, questions, question, variant, files.size());
 
+    if (type == COMMON_DECISION_TYPE_D3) {
+        fill_task_d3(prompt, question, files, mctx, init_opt, task);
+        return;
+    }
+
     if (type == COMMON_DECISION_TYPE_OPENJEV || type == COMMON_DECISION_TYPE_LEV || type == COMMON_DECISION_TYPE_NIMBLE || type == COMMON_DECISION_TYPE_PPLX_DECIDER) {
         // lev reads the ratings of a noul question at its first labels, not at the digits
         task.decision.labels.assign(labels.begin(), labels.begin() + n_outputs(question));
@@ -802,37 +942,7 @@ void server_decision_context::fill_task(
 
 static std::string decision2_canonical(const json & value) {
     if (value.is_number_float()) {
-        char buffer[64];
-        const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value.get<double>(), std::chars_format::general);
-        if (result.ec != std::errc()) {
-            throw std::invalid_argument("invalid Decision2 JSON number");
-        }
-        std::string number(buffer, result.ptr);
-        const auto exp_pos = number.find('e');
-        if (exp_pos != std::string::npos) {
-            const int exponent = std::stoi(number.substr(exp_pos + 1));
-            // Match Python repr(float): fixed notation for decimal exponents [-4, 16).
-            if (exponent >= -4 && exponent < 16) {
-                std::string digits = number.substr(0, exp_pos);
-                const bool negative = digits.front() == '-';
-                if (negative) {
-                    digits.erase(0, 1);
-                }
-                digits.erase(std::remove(digits.begin(), digits.end(), '.'), digits.end());
-                const int point = exponent + 1;
-                if (point <= 0) {
-                    number = "0." + std::string(-point, '0') + digits;
-                } else if ((size_t) point >= digits.size()) {
-                    number = digits + std::string(point - digits.size(), '0') + ".0";
-                } else {
-                    number = digits.substr(0, point) + "." + digits.substr(point);
-                }
-                return negative ? "-" + number : number;
-            }
-        } else if (number.find('.') == std::string::npos) {
-            number += ".0";
-        }
-        return number;
+        return decision_py_float(value.get<double>());
     }
     if (value.is_object()) {
         const auto sorted = decision_sort_keys(value);
@@ -883,6 +993,26 @@ void server_decision_context::fill_task_decision2(const json & state, const serv
     task.decision.n_scores = question.options.size();
     task.params.cache_prompt = false;
     task.tokens = server_tokens(tokens, false);
+}
+
+// the code logits of the options are the first columns of the embeddings at the last prompt token
+// the attention is not causal: the whole prompt is evaluated in one batch, it is not shared or cached
+void server_decision_context::fill_task_d3(
+        const std::string & prompt,
+        const server_decision_question & question,
+        const std::vector<raw_buffer> & files,
+        mtmd_context * mctx,
+        const mtmd_helper_init_opt & init_opt,
+        server_task & task) const {
+    if (files.empty()) {
+        task.tokens = server_tokens(common_tokenize(vocab, prompt, false, true), false);
+    } else {
+        task.tokens = process_mtmd_prompt(mctx, prompt, files, init_opt);
+    }
+    task.decision.markers   = { task.n_tokens() - 1 };
+    task.decision.n_columns = question.options.size();
+    task.decision.first     = 0;
+    task.params.cache_prompt = false;
 }
 
 // the prompt is: [cls] question [sep] ([marker] option)* [sep] state [sep]
@@ -1243,6 +1373,9 @@ json server_decision_context::format_answer(const server_decision_question & que
         throw std::runtime_error("decision result does not match the number of variants");
     }
 
+    // decision2 and d3 report the confidence and the legend as their own runtimes do
+    const bool runtime_api = type == COMMON_DECISION_TYPE_DECISION2 || type == COMMON_DECISION_TYPE_D3;
+
     // softmax over the outputs of each variant, then the average of the variants
     // lfm2-d1-omni: image and audio answers are not calibrated
     const float temperature = has_media && type == COMMON_DECISION_TYPE_LFM2_D1_OMNI ? 1.0f : get_temperature(question);
@@ -1253,7 +1386,7 @@ json server_decision_context::format_answer(const server_decision_question & que
             throw std::runtime_error("decision result does not match the number of options");
         }
         // a joint head returns NaN if it could not use the decision order
-        if (std::any_of(s.begin(), s.end(), [this](float v) { return std::isnan(v) || (type == COMMON_DECISION_TYPE_DECISION2 && !std::isfinite(v)); })) {
+        if (std::any_of(s.begin(), s.end(), [runtime_api](float v) { return std::isnan(v) || (runtime_api && !std::isfinite(v)); })) {
             throw std::runtime_error("the model could not evaluate the decision");
         }
         const auto offsets = score_bias.find(n);
@@ -1303,7 +1436,7 @@ json server_decision_context::format_answer(const server_decision_question & que
     }
 
     double entropy_confidence = 1.0;
-    if (type == COMMON_DECISION_TYPE_DECISION2) {
+    if (runtime_api) {
         double entropy = 0.0;
         for (const auto p : probs) {
             if (p > 0.0) {
@@ -1317,18 +1450,18 @@ json server_decision_context::format_answer(const server_decision_question & que
         const size_t best = std::max_element(probs.begin(), probs.end()) - probs.begin();
         answer["choice"]        = question.options[best].key;
         answer["probabilities"] = probabilities;
-        answer["confidence"]    = type == COMMON_DECISION_TYPE_DECISION2 ? entropy_confidence : decision_confidence_choice(probs);
+        answer["confidence"]    = runtime_api ? entropy_confidence : decision_confidence_choice(probs);
     } else {
         double expected = 0.0;
         json legend = json::object();
         for (size_t i = 0; i < n; i++) {
             expected += i * probs[i];
-            legend[question.options[i].key] = type == COMMON_DECISION_TYPE_DECISION2 ? json(decision2_payload(question.options[i].description)) : question.options[i].description;
+            legend[question.options[i].key] = runtime_api ? json(decision2_payload(question.options[i].description)) : question.options[i].description;
         }
         answer["score"]         = expected;
         answer["legend"]        = legend;
         answer["probabilities"] = probabilities;
-        answer["confidence"]    = type == COMMON_DECISION_TYPE_DECISION2 ? entropy_confidence : decision_confidence_score(probs);
+        answer["confidence"]    = runtime_api ? entropy_confidence : decision_confidence_score(probs);
     }
     return answer;
 }

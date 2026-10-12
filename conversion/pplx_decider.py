@@ -13,10 +13,14 @@ if TYPE_CHECKING:
 from .base import ModelBase, gguf, jinja_str_or_json, logger
 from .qwen import Qwen3_5TextModel
 from .qwen3vl import Qwen3VLVisionModel
+from .d3 import is_d3_checkpoint
 
 
 def _is_pplx_decider_checkpoint(dir_model: Path) -> bool:
-    return all((dir_model / name).is_file() for name in ("decision_config.json", "readout.safetensors", "config.json"))
+    if not all((dir_model / name).is_file() for name in ("decision_config.json", "readout.safetensors", "config.json")):
+        return False
+    # d3 checkpoints have the same files
+    return not is_d3_checkpoint(dir_model)
 
 
 @ModelBase.register_hparams_loader(_is_pplx_decider_checkpoint)

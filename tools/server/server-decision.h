@@ -64,10 +64,16 @@ struct server_decision_context {
             case COMMON_DECISION_TYPE_PPLX_DECIDER:
             case COMMON_DECISION_TYPE_LFM2_D1:
             case COMMON_DECISION_TYPE_LFM2_D1_OMNI:
+            case COMMON_DECISION_TYPE_D3:
                 return true;
             default:
                 return false;
         }
+    }
+
+    // true if an invalid question gets an error answer, and the other questions are still answered
+    bool has_question_errors() const {
+        return type == COMMON_DECISION_TYPE_DECISION2 || type == COMMON_DECISION_TYPE_D3;
     }
 
     // throw std::invalid_argument on bad input
@@ -116,7 +122,7 @@ private:
     bool   noul_true_first = false; // noul options are [true, false] instead of [false, true]
     bool   choice_sorted   = false; // choice options are in the order of their keys
 
-    // OPENJEV, LEV, NIMBLE, PPLX_DECIDER
+    // OPENJEV, LEV, NIMBLE, PPLX_DECIDER, D3
     std::vector<llama_token> labels;
     std::vector<std::string> label_texts; // only if the label of an option is given to the template
 
@@ -139,6 +145,13 @@ private:
     // LFM2_D1: label text and tokens of each option
     void d1_labels(const server_decision_question & question, std::vector<std::string> & texts, std::vector<llama_tokens> & groups) const;
     void fill_task_decision2(const json & state, const server_decision_question & question, server_task & task) const;
+    void fill_task_d3(
+            const std::string & prompt,
+            const server_decision_question & question,
+            const std::vector<raw_buffer> & files,
+            mtmd_context * mctx,
+            const mtmd_helper_init_opt & init_opt,
+            server_task & task) const;
     void fill_task_laya(llama_tokens & tokens, const server_decision_question & question, server_task & task) const;
     void fill_task_d1omni(
             const json & state,

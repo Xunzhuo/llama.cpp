@@ -966,6 +966,7 @@ enum common_decision_type {
     COMMON_DECISION_TYPE_PPLX_DECIDER, // same as openjev, label codes of 1 or 2 letters
     COMMON_DECISION_TYPE_LFM2_D1, // same as openjev, the labels depend on the question type
     COMMON_DECISION_TYPE_LFM2_D1_OMNI, // same as laya, other prompt layout
+    COMMON_DECISION_TYPE_D3,      // same labels as pplx-decider, non-causal, the code logits are read from the embeddings output at the last token
     COMMON_DECISION_TYPE_UNKNOWN, // a decision model of a type that is not supported
 };
 
